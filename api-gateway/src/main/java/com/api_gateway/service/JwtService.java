@@ -1,10 +1,12 @@
 package com.api_gateway.service;
 
+import com.api_gateway.entity.User;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.userdetails.UserDetails;
+
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
@@ -25,19 +27,54 @@ public class JwtService {
     @Value("${app.jwt.refresh-expiration}")
     private long refreshExpiration;
 
-
-    public String generateAccessToken(UserDetails userDetails) {
+    // ✅ Takes User entity — includes userId in claims
+    public String generateAccessToken(User user) {
         Map<String, Object> claims = new HashMap<>();
-        claims.put("role", userDetails.getAuthorities()
-                .iterator().next().getAuthority());
-        return buildToken(claims, userDetails.getUsername(), jwtExpiration);
+        claims.put("userId", String.valueOf(user.getId()));
+        claims.put("role", user.getRole());
+        return buildToken(claims, user.getEmail(), jwtExpiration);
     }
 
-    public String generateRefreshToken(UserDetails userDetails) {
-        return buildToken(new HashMap<>(), userDetails.getUsername(), refreshExpiration);
+    // ✅ Refresh token only needs email — no userId/role needed
+    public String generateRefreshToken(String email) {
+        return buildToken(new HashMap<>(), email, refreshExpiration);
     }
 
-    private String buildToken(Map<String, Object> claims, String subject, long expiration) {
+    // ✅ Validate without UserDetails (used in gateway filter)
+    public boolean isTokenValid(String token) {
+        try {
+            extractAllClaims(token);
+            return !isTokenExpired(token);
+        } catch (JwtException e) {
+            return false;
+        }
+    }
+
+    // ── Extract methods ───────────────────────────────────────────
+
+    public String extractEmail(String token) {
+        return extractClaim(token, Claims::getSubject);
+    }
+
+    public String extractUserId(String token) {
+        return extractClaim(token,
+                claims -> claims.get("userId", String.class));
+    }
+
+    public String extractRole(String token) {
+        return extractClaim(token,
+                claims -> claims.get("role", String.class));
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────
+
+    private boolean isTokenExpired(String token) {
+        return extractClaim(token, Claims::getExpiration).before(new Date());
+    }
+
+    private String buildToken(Map<String, Object> claims,
+                              String subject,
+                              long expiration) {
         return Jwts.builder()
                 .claims(claims)
                 .subject(subject)
@@ -47,29 +84,8 @@ public class JwtService {
                 .compact();
     }
 
-
-
-    public boolean isTokenValid(String token, UserDetails userDetails) {
-        final String email = extractEmail(token);
-        return email.equals(userDetails.getUsername()) && !isTokenExpired(token);
-    }
-
-    private boolean isTokenExpired(String token) {
-        return extractExpiration(token).before(new Date());
-    }
-
-
-    public String extractEmail(String token) {
-        return extractClaim(token, Claims::getSubject);
-    }
-
-    private Date extractExpiration(String token) {
-        return extractClaim(token, Claims::getExpiration);
-    }
-
-    public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
-        final Claims claims = extractAllClaims(token);
-        return claimsResolver.apply(claims);
+    public <T> T extractClaim(String token, Function<Claims, T> resolver) {
+        return resolver.apply(extractAllClaims(token));
     }
 
     private Claims extractAllClaims(String token) {

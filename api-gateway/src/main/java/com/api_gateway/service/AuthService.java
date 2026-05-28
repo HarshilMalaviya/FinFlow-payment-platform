@@ -6,14 +6,18 @@ import com.api_gateway.dto.RegisterRequest;
 import com.api_gateway.entity.Role;
 import com.api_gateway.entity.User;
 import com.api_gateway.repository.UserRepository;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.userdetails.UserDetails;
+
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+
+
 
 @Service
 @RequiredArgsConstructor
@@ -27,10 +31,8 @@ public class AuthService {
 
     public LoginResponse register(RegisterRequest request) {
 
-        if (userRepository.existsByEmail(request.email())) {
+        if (userRepository.existsByEmail(request.email()))
             throw new RuntimeException("Email already registered");
-        }
-
 
         User user = User.builder()
                 .fullName(request.fullName())
@@ -40,46 +42,35 @@ public class AuthService {
                 .balance(new BigDecimal("1000.00"))
                 .build();
 
-        userRepository.save( user);
+        User savedUser = userRepository.save(user); // ← use savedUser (has ID now)
 
-
-        UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
-        String accessToken  = jwtService.generateAccessToken(userDetails);
-        String refreshToken = jwtService.generateRefreshToken(userDetails);
+        // ✅ Pass User entity directly — not UserDetails
+        String accessToken  = jwtService.generateAccessToken(savedUser);
+        String refreshToken = jwtService.generateRefreshToken(savedUser.getEmail());
 
         return new LoginResponse(
-                accessToken,
-                refreshToken,
-                "Bearer",
-                86400L,
-                user.getEmail(),
-                user.getRole().toString()
+                accessToken, refreshToken, "Bearer",
+                86400L, savedUser.getEmail(), savedUser.getRole().toString()
         );
     }
 
     public LoginResponse login(LoginRequest request) {
 
-
         authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.email(),
-                        request.password()
-                )
+                new UsernamePasswordAuthenticationToken(request.email(), request.password())
         );
 
-        UserDetails userDetails = userDetailsService.loadUserByUsername(request.email());
-        String accessToken  = jwtService.generateAccessToken(userDetails);
-        String refreshToken = jwtService.generateRefreshToken(userDetails);
+        // ✅ Fetch User entity from DB — not UserDetails
+        User user = userRepository.findByEmail(request.email())
+                .orElseThrow(() -> new RuntimeException("User not found"));
 
-        User user = userRepository.findByEmail(request.email()).orElseThrow();
+        String accessToken  = jwtService.generateAccessToken(user);
+        String refreshToken = jwtService.generateRefreshToken(user.getEmail());
 
         return new LoginResponse(
-                accessToken,
-                refreshToken,
-                "Bearer",
-                86400L,
-                user.getEmail(),
-                user.getRole().toString()
+                accessToken, refreshToken, "Bearer",
+                86400L, user.getEmail(), user.getRole().toString()
         );
     }
+
 }
